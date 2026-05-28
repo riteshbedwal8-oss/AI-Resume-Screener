@@ -8,6 +8,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from streamlit_option_menu import option_menu
 
+import nltk
+nltk.download('stopwords', quiet=True)
+nltk.download('punkt', quiet=True)
+nltk.download('wordnet', quiet=True)
+
 # Import project modules
 from src.parser import parse_resume
 from src.preprocess import full_preprocess
