@@ -850,8 +850,8 @@ if run:
     with st.spinner("Running two-tier AI analysis + 19-point audit…"):
 
         jd_processed = full_preprocess(jd_text)
-        jd_embedding = get_embedding(jd_processed)
         jd_skills    = extract_skills(jd_text)
+        
 
         candidate_names = []
         resume_texts    = []
@@ -869,7 +869,12 @@ if run:
             raw_texts.append(raw)
             os.unlink(tmp_path)
 
-        resume_embeddings = get_batch_embeddings(resume_texts)
+        # Fit TF-IDF on ALL texts together so vocabulary matches
+        from src.vectorizer import fit_and_encode
+        all_texts         = resume_texts + [jd_processed]
+        all_embeddings    = fit_and_encode(all_texts)
+        resume_embeddings = all_embeddings[:-1]
+        jd_embedding      = all_embeddings[-1]
         scores            = score_all_resumes(resume_embeddings, jd_embedding)
 
         skill_data = []

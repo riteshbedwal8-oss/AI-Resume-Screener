@@ -1,6 +1,4 @@
 # src/vectorizer.py
-# Purpose: Convert text into TF-IDF vectors
-
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 
@@ -10,25 +8,21 @@ _vectorizer = TfidfVectorizer(
     ngram_range=(1, 2)
 )
 
-_is_fitted = False
 
-
-def get_batch_embeddings(texts: list) -> np.ndarray:
-    """Fit vectorizer on all texts and return their vectors."""
-    global _vectorizer, _is_fitted
-    _vectorizer = TfidfVectorizer(
-        max_features=5000,
-        stop_words='english',
-        ngram_range=(1, 2)
-    )
-    _is_fitted = True
-    return _vectorizer.fit_transform(texts).toarray()
+def fit_and_encode(all_texts: list) -> np.ndarray:
+    """
+    Fit vectorizer on ALL texts at once and return all vectors.
+    all_texts = resume_texts + [jd_text]  (JD always last)
+    """
+    matrix = _vectorizer.fit_transform(all_texts).toarray()
+    return matrix
 
 
 def get_embedding(text: str) -> np.ndarray:
-    """Transform a single text using already-fitted vectorizer."""
-    global _vectorizer, _is_fitted
-    if not _is_fitted:
-        _vectorizer.fit([text])
-        _is_fitted = True
+    """Transform single text using already fitted vectorizer."""
     return _vectorizer.transform([text]).toarray()[0]
+
+
+def get_batch_embeddings(texts: list) -> np.ndarray:
+    """Transform multiple texts using already fitted vectorizer."""
+    return _vectorizer.transform(texts).toarray()
