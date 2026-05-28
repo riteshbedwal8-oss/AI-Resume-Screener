@@ -1,4 +1,5 @@
 # 🚀 AI Resume Screening System
+<img width="1917" height="943" alt="Screenshot 2026-05-27 190853" src="https://github.com/user-attachments/assets/02d5ead6-6499-40fe-9497-20b1dcd050ef" />
 
 Developed an AI-powered Resume Screening and Candidate Ranking System using Python, NLP, and Streamlit to automate the recruitment shortlisting process.
 
