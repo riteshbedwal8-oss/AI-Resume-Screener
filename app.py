@@ -16,7 +16,7 @@ nltk.download('wordnet', quiet=True)
 # Import project modules
 from src.parser import parse_resume
 from src.preprocess import full_preprocess
-from src.vectorizer import get_embedding, get_batch_embeddings
+from src.vectorizer import fit_and_encode
 from src.matcher import score_all_resumes
 from src.skill_extractor import extract_skills, get_skill_gap
 from src.ranker import rank_candidates
@@ -130,7 +130,7 @@ h1,h2,h3,h4 { font-family:'Syne',sans-serif !important; color:var(--txt) !import
 .chip-warn { background:rgba(210,153,34,.12); color:var(--warn); border:1px solid rgba(210,153,34,.3); }
 .chip-blue { background:rgba(56,139,253,.12); color:var(--blue); border:1px solid rgba(56,139,253,.3); }
 
-/* ── AUDIT PANEL ──────────────────────────────── */
+/* AUDIT PANEL */
 .audit-panel {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -152,7 +152,6 @@ h1,h2,h3,h4 { font-family:'Syne',sans-serif !important; color:var(--txt) !import
 }
 .audit-body { padding: 20px; }
 
-/* audit check row */
 .check-row {
     display: flex; align-items: flex-start; gap: 12px;
     padding: 10px 0;
@@ -172,7 +171,6 @@ h1,h2,h3,h4 { font-family:'Syne',sans-serif !important; color:var(--txt) !import
 }
 .check-suggestion b { color: var(--accent); }
 
-/* category badge */
 .cat-badge {
     font-size: 10px; font-weight: 600; letter-spacing: .08em;
     text-transform: uppercase; padding: 2px 8px; border-radius: 4px;
@@ -184,17 +182,14 @@ h1,h2,h3,h4 { font-family:'Syne',sans-serif !important; color:var(--txt) !import
 .cat-sections { background:rgba(248,81,73,.15);   color:var(--danger); }
 .cat-style    { background:rgba(163,113,247,.15); color:#A371F7; }
 
-/* progress bar mini */
 .mini-bar-bg { background:var(--surface2); border-radius:4px; height:5px; margin-top:4px; }
 .mini-bar-fill { height:5px; border-radius:4px; }
 
-/* tier boxes */
 .tier-box { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; }
 .tier-num { width:28px; height:28px; background:var(--accent); border-radius:50%;
     display:flex; align-items:center; justify-content:center;
     font-family:'Syne',sans-serif; font-size:13px; font-weight:700; color:#0D2B1F; flex-shrink:0; }
 
-/* check grid (ATS page) */
 .check-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; margin-top:10px; }
 .check-item { display:flex; align-items:center; gap:8px; background:var(--surface);
     border:1px solid var(--border); border-radius:8px; padding:10px 12px;
@@ -204,12 +199,10 @@ h1,h2,h3,h4 { font-family:'Syne',sans-serif !important; color:var(--txt) !import
 .dot-fail { background:var(--danger); }
 .dot-warn { background:var(--warn); }
 
-/* tabs */
 .stTabs [data-baseweb="tab-list"] { background:var(--surface); border-radius:8px 8px 0 0; border-bottom:1px solid var(--border); gap:0; }
 .stTabs [data-baseweb="tab"] { color:var(--txt2) !important; font-family:'DM Sans',sans-serif; padding:10px 20px; }
 .stTabs [aria-selected="true"] { color:var(--accent) !important; border-bottom:2px solid var(--accent) !important; }
 
-/* button */
 .stButton>button {
     width:100% !important;
     background:linear-gradient(90deg,#1B6F52,var(--accent)) !important;
@@ -220,10 +213,8 @@ h1,h2,h3,h4 { font-family:'Syne',sans-serif !important; color:var(--txt) !import
 }
 .stButton>button:hover { opacity:.88 !important; }
 
-/* dataframe */
 [data-testid="stDataFrame"] { border:1px solid var(--border) !important; border-radius:10px !important; overflow:hidden; }
 
-/* expander */
 .streamlit-expanderHeader { background:var(--surface) !important; border:1px solid var(--border) !important;
     border-radius:10px !important; font-family:'DM Sans',sans-serif; color:var(--txt) !important; }
 
@@ -235,15 +226,9 @@ h1,h2,h3,h4 { font-family:'Syne',sans-serif !important; color:var(--txt) !import
 
 
 # ─────────────────────────────────────────────────────────────
-# ██  RESUME AUDIT ENGINE
+# RESUME AUDIT ENGINE
 # ─────────────────────────────────────────────────────────────
-"""
-Full 19-point audit on raw resume text.
-Returns a dict with: issues list, suggestions list, scores per category,
-overall audit score (0-100), grade letter.
-"""
 
-# ── keyword sets ──────────────────────────────────────────────
 WEAK_VERBS   = {"worked","did","made","helped","used","tried","got","went",
                 "involved","participated","assisted","handled"}
 BUZZWORDS    = {"hardworking","team player","go-getter","results-driven","synergy",
@@ -265,9 +250,9 @@ SECTION_KWS  = {
     "certifications": ["certification","certificate","certified","credential"],
 }
 QUANT_PATTERNS = [
-    r'\d+\s*%',                       # 40%
-    r'\$\s*[\d,]+',                   # $50,000
-    r'₹\s*[\d,]+',                    # ₹5,00,000
+    r'\d+\s*%',
+    r'\$\s*[\d,]+',
+    r'₹\s*[\d,]+',
     r'\d+\+?\s*(users|clients|projects|teams|members|employees|records|rows)',
     r'(increased|reduced|improved|saved|grew|generated|cut)\s+by\s+\d+',
     r'\d+\s*(x|times)\s*(faster|improvement|growth)',
@@ -275,67 +260,55 @@ QUANT_PATTERNS = [
 ]
 
 
-def _find_sections(text: str) -> dict:
+def _find_sections(text):
     found = {}
     tl = text.lower()
     for sec, kws in SECTION_KWS.items():
         found[sec] = any(kw in tl for kw in kws)
     return found
 
-
-def _count_quant(text: str) -> int:
+def _count_quant(text):
     count = 0
     for pat in QUANT_PATTERNS:
         count += len(re.findall(pat, text, re.IGNORECASE))
     return count
 
-
-def _word_count(text: str) -> int:
+def _word_count(text):
     return len(text.split())
 
-
-def _count_action_verbs(text: str) -> int:
+def _count_action_verbs(text):
     words = set(re.findall(r'\b[a-zA-Z]+\b', text.lower()))
     return len(words & ACTION_VERBS)
 
-
-def _count_weak_verbs(text: str) -> int:
+def _count_weak_verbs(text):
     words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
     return sum(1 for w in words if w in WEAK_VERBS)
 
-
-def _count_buzzwords(text: str) -> int:
+def _count_buzzwords(text):
     words = set(re.findall(r'\b[a-zA-Z]+\b', text.lower()))
     return len(words & BUZZWORDS)
 
-
-def _count_filler(text: str) -> int:
+def _count_filler(text):
     tl = text.lower()
     return sum(1 for f in FILLER if f in tl)
 
-
-def _has_email(text: str) -> bool:
+def _has_email(text):
     return bool(re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text))
 
-
-def _has_phone(text: str) -> bool:
+def _has_phone(text):
     return bool(re.search(r'(\+?\d[\d\s\-().]{7,}\d)', text))
 
-
-def _has_linkedin(text: str) -> bool:
+def _has_linkedin(text):
     return 'linkedin' in text.lower()
 
-
-def _has_github(text: str) -> bool:
+def _has_github(text):
     return 'github' in text.lower()
 
-
-def _bullet_count(text: str) -> int:
+def _bullet_count(text):
     lines = text.split('\n')
     return sum(1 for l in lines if l.strip().startswith(('-', '•', '·', '*', '–')))
 
-
-def _long_bullets(text: str, threshold=25) -> int:
+def _long_bullets(text, threshold=25):
     lines = text.split('\n')
     count = 0
     for l in lines:
@@ -345,8 +318,7 @@ def _long_bullets(text: str, threshold=25) -> int:
                 count += 1
     return count
 
-
-def _word_freq(text: str, top=5) -> list:
+def _word_freq(text, top=5):
     stop = {"and","the","to","of","in","a","for","with","on","is","at","by",
             "an","as","be","this","that","are","was","were","has","have","had",
             "it","its","or","from","not","but","we","you","i","my","your","our"}
@@ -359,20 +331,15 @@ def _word_freq(text: str, top=5) -> list:
     return [(w, c) for w, c in sorted_freq if c > 2][:top]
 
 
-def audit_resume(raw_text: str, filename: str, jd_skills: set, match_score: float) -> dict:
-    """
-    Run all 19 checks. Return structured audit report.
-    """
-    issues      = []   # list of dicts: {category, label, severity, detail, suggestion}
-    passed      = []   # list of dicts: {category, label, detail}
-    cat_scores  = {}   # category -> 0-100
+def audit_resume(raw_text, filename, jd_skills, match_score):
+    issues     = []
+    passed     = []
+    cat_scores = {}
 
-    # ── 1. Contact Information ─────────────────────────────────
     has_email    = _has_email(raw_text)
     has_phone    = _has_phone(raw_text)
     has_linkedin = _has_linkedin(raw_text)
     has_github   = _has_github(raw_text)
-
     contact_score = sum([has_email, has_phone, has_linkedin, has_github]) * 25
 
     if has_email:
@@ -405,12 +372,11 @@ def audit_resume(raw_text: str, filename: str, jd_skills: set, match_score: floa
 
     cat_scores["Sections"] = contact_score
 
-    # ── 2. Essential Sections ──────────────────────────────────
     sections  = _find_sections(raw_text)
     essential = ["summary","experience","education","skills"]
     bonus     = ["projects","certifications"]
-
     sec_score = 0
+
     for sec in essential:
         if sections.get(sec):
             passed.append({"category":"Sections","label":f"'{sec.title()}' section found","detail":f"ATS can parse the {sec} section."})
@@ -427,47 +393,42 @@ def audit_resume(raw_text: str, filename: str, jd_skills: set, match_score: floa
 
     cat_scores["Sections"] = min(100, cat_scores.get("Sections",0) + sec_score)
 
-    # ── 3. Quantified Achievements ─────────────────────────────
     quant_count = _count_quant(raw_text)
     if quant_count >= 5:
-        passed.append({"category":"Content","label":f"{quant_count} quantified achievements found",
-            "detail":"Strong use of numbers, percentages, and measurable impact."})
+        passed.append({"category":"Content","label":f"{quant_count} quantified achievements found","detail":"Strong use of numbers, percentages, and measurable impact."})
         quant_score = 100
     elif quant_count >= 2:
         issues.append({"category":"Content","label":f"Only {quant_count} quantified achievement(s)","severity":"medium",
             "detail":"Recruiters and ATS score resumes higher when bullet points contain numbers.",
-            "suggestion":"Aim for 5+ metrics. Add: <b>% improvement, $ saved, # records processed, rows of data, team size</b>. Example: 'Reduced report time by 40%' instead of 'Improved reporting'."})
+            "suggestion":"Aim for 5+ metrics. Add: <b>% improvement, $ saved, # records processed, rows of data, team size</b>."})
         quant_score = 50
     else:
         issues.append({"category":"Content","label":"No quantified achievements detected","severity":"critical",
             "detail":"Zero measurable results found. This is the #1 reason resumes get rejected.",
-            "suggestion":"Every bullet point should answer: <b>How much? How many? By what %?</b> E.g. 'Processed 100K+ rows', 'Reduced manual effort by 35%', 'Built 3 dashboards'."})
+            "suggestion":"Every bullet point should answer: <b>How much? How many? By what %?</b>"})
         quant_score = 0
 
     cat_scores["Content"] = quant_score
 
-    # ── 4. Action Verbs ────────────────────────────────────────
     action_count = _count_action_verbs(raw_text)
     weak_count   = _count_weak_verbs(raw_text)
 
     if action_count >= 8:
-        passed.append({"category":"Content","label":f"{action_count} strong action verbs used",
-            "detail":"Excellent use of power verbs — resume reads as achievement-driven."})
+        passed.append({"category":"Content","label":f"{action_count} strong action verbs used","detail":"Excellent use of power verbs."})
         verb_score = 100
     elif action_count >= 4:
         issues.append({"category":"Content","label":f"Only {action_count} action verbs detected","severity":"medium",
-            "detail":f"Resume has {action_count} action verbs and {weak_count} weak verbs. Needs more impact.",
-            "suggestion":"Start every bullet with a strong verb: <b>Led, Built, Automated, Analyzed, Optimized, Delivered, Designed, Implemented, Reduced, Increased</b>"})
+            "detail":f"Resume has {action_count} action verbs and {weak_count} weak verbs.",
+            "suggestion":"Start every bullet with a strong verb: <b>Led, Built, Automated, Analyzed, Optimized</b>"})
         verb_score = 55
     else:
         issues.append({"category":"Content","label":"Weak action verb usage","severity":"high",
-            "detail":f"Only {action_count} action verbs and {weak_count} weak verbs detected. Resume sounds passive.",
-            "suggestion":"Replace: <b>'Worked on reports'</b> → <b>'Automated reporting workflows'</b>. Never start a bullet with 'Responsible for', 'Did', or 'Helped'."})
+            "detail":f"Only {action_count} action verbs and {weak_count} weak verbs detected.",
+            "suggestion":"Replace: <b>'Worked on reports'</b> → <b>'Automated reporting workflows'</b>"})
         verb_score = 20
 
     cat_scores["Content"] = (cat_scores.get("Content",0) + verb_score) // 2
 
-    # ── 5. Weak / Filler Language ──────────────────────────────
     filler_count = _count_filler(raw_text)
     buzz_count   = _count_buzzwords(raw_text)
 
@@ -478,11 +439,11 @@ def audit_resume(raw_text: str, filename: str, jd_skills: set, match_score: floa
         detail_parts = []
         suggestion_parts = []
         if filler_count > 0:
-            detail_parts.append(f"{filler_count} filler phrase(s) detected (e.g. 'responsible for', 'duties included')")
+            detail_parts.append(f"{filler_count} filler phrase(s) detected")
             suggestion_parts.append("Replace <b>'Responsible for managing'</b> → <b>'Managed'</b>")
         if buzz_count > 0:
-            detail_parts.append(f"{buzz_count} buzzword(s) found (e.g. 'passionate', 'team player', 'hardworking')")
-            suggestion_parts.append("Remove buzzwords — they add no ATS value. Replace with specific skills and achievements.")
+            detail_parts.append(f"{buzz_count} buzzword(s) found")
+            suggestion_parts.append("Remove buzzwords — replace with specific skills and achievements.")
         issues.append({"category":"Style","label":f"{filler_count + buzz_count} filler/buzzword issue(s)","severity":"medium",
             "detail":" | ".join(detail_parts),
             "suggestion":" &nbsp;•&nbsp; ".join(suggestion_parts)})
@@ -490,20 +451,19 @@ def audit_resume(raw_text: str, filename: str, jd_skills: set, match_score: floa
 
     cat_scores["Style"] = style_score
 
-    # ── 6. Word Count / Length ─────────────────────────────────
     wc = _word_count(raw_text)
     if 300 <= wc <= 700:
-        passed.append({"category":"Format","label":f"Good length ({wc} words)","detail":"Resume is within ideal 300–700 word range for a 1-page fresher resume."})
+        passed.append({"category":"Format","label":f"Good length ({wc} words)","detail":"Resume is within ideal 300–700 word range."})
         len_score = 100
     elif wc < 200:
         issues.append({"category":"Format","label":f"Resume too short ({wc} words)","severity":"high",
             "detail":"Under 200 words — too thin to pass ATS keyword density checks.",
-            "suggestion":"Expand your bullet points. Add more detail to projects and internship. Target <b>300–600 words</b>."})
+            "suggestion":"Expand your bullet points. Target <b>300–600 words</b>."})
         len_score = 30
     elif wc > 900:
         issues.append({"category":"Format","label":f"Resume too long ({wc} words)","severity":"medium",
-            "detail":"Over 900 words for a fresher resume. Recruiters scan in 6-8 seconds.",
-            "suggestion":"Trim to <b>1 page / 500–700 words</b>. Remove old irrelevant bullets. Be concise."})
+            "detail":"Over 900 words for a fresher resume.",
+            "suggestion":"Trim to <b>1 page / 500–700 words</b>."})
         len_score = 60
     else:
         passed.append({"category":"Format","label":f"Acceptable length ({wc} words)","detail":"Length is within range."})
@@ -511,49 +471,44 @@ def audit_resume(raw_text: str, filename: str, jd_skills: set, match_score: floa
 
     cat_scores["Format"] = len_score
 
-    # ── 7. Long Bullets ────────────────────────────────────────
     long_b = _long_bullets(raw_text)
     if long_b == 0:
         passed.append({"category":"Format","label":"No overly long bullet points","detail":"All bullets are concise and scannable."})
     else:
         issues.append({"category":"Format","label":f"{long_b} long bullet point(s) detected","severity":"low",
-            "detail":f"{long_b} bullet(s) exceed 25 words. Long bullets are hard to scan.",
-            "suggestion":"Split long bullets into 2 shorter ones. Each bullet = <b>1 action + 1 result</b>. Max 20 words."})
+            "detail":f"{long_b} bullet(s) exceed 25 words.",
+            "suggestion":"Split long bullets into 2 shorter ones. Each bullet = <b>1 action + 1 result</b>."})
         cat_scores["Format"] = max(0, cat_scores.get("Format",100) - 15)
 
-    # ── 8. Repetition / Word Overuse ──────────────────────────
     top_words = _word_freq(raw_text)
     if top_words:
         word, count = top_words[0]
         if count > 5:
             issues.append({"category":"Style","label":f"Word overuse detected ('{word}' × {count})","severity":"low",
-                "detail":f"The word '{word}' appears {count} times. Repetition reduces readability.",
-                "suggestion":f"Vary your vocabulary. Replace some instances of '<b>{word}</b>' with synonyms or restructure sentences."})
+                "detail":f"The word '{word}' appears {count} times.",
+                "suggestion":f"Vary your vocabulary. Replace some instances of '<b>{word}</b>' with synonyms."})
         else:
             passed.append({"category":"Style","label":"Good vocabulary variety","detail":"No significant word overuse detected."})
     cat_scores["Style"] = (cat_scores.get("Style",0) + 80) // 2
 
-    # ── 9. Bullet Point Count ──────────────────────────────────
     bullets = _bullet_count(raw_text)
     if bullets >= 6:
         passed.append({"category":"Format","label":f"{bullets} bullet points found","detail":"Good use of structured bullet points for ATS parsing."})
     elif bullets >= 3:
         issues.append({"category":"Format","label":f"Low bullet point count ({bullets})","severity":"low",
-            "detail":"Fewer than 6 bullets makes resume hard to scan. ATS parses bullet structure.",
+            "detail":"Fewer than 6 bullets makes resume hard to scan.",
             "suggestion":"Convert paragraph text into <b>bullet points</b>. Aim for 3–5 bullets per role/project."})
     else:
         issues.append({"category":"Format","label":"Almost no bullet points detected","severity":"medium",
-            "detail":"Resume appears to use paragraph format instead of bullets. ATS prefers bullets.",
+            "detail":"Resume appears to use paragraph format instead of bullets.",
             "suggestion":"Restructure all experience and project entries as <b>bullet points starting with action verbs</b>."})
 
-    # ── 10. Skill Coverage vs JD ──────────────────────────────
     resume_skills = extract_skills(raw_text)
     gap_data      = get_skill_gap(resume_skills, jd_skills)
     matched_s     = gap_data.get("matched", [])
     missing_s     = gap_data.get("missing", [])
-
-    total_jd = len(jd_skills) if jd_skills else 1
-    coverage  = int(len(matched_s) / total_jd * 100) if total_jd > 0 else 0
+    total_jd      = len(jd_skills) if jd_skills else 1
+    coverage      = int(len(matched_s) / total_jd * 100) if total_jd > 0 else 0
 
     if coverage >= 80:
         passed.append({"category":"Skills","label":f"High JD skill coverage ({coverage}%)","detail":"Resume matches most required skills from the job description."})
@@ -561,60 +516,54 @@ def audit_resume(raw_text: str, filename: str, jd_skills: set, match_score: floa
     elif coverage >= 50:
         issues.append({"category":"Skills","label":f"Moderate JD skill coverage ({coverage}%)","severity":"medium",
             "detail":f"Matched {len(matched_s)} of {total_jd} required skills. Missing: {', '.join(list(missing_s)[:5])}",
-            "suggestion":f"Add these missing skills if you have them: <b>{', '.join(list(missing_s)[:6])}</b>. Include them naturally in bullet points."})
+            "suggestion":f"Add these missing skills: <b>{', '.join(list(missing_s)[:6])}</b>"})
         skill_score = 60
     else:
         issues.append({"category":"Skills","label":f"Low JD skill coverage ({coverage}%)","severity":"high",
-            "detail":f"Only {len(matched_s)} of {total_jd} required JD skills found. ATS will likely filter this resume out.",
-            "suggestion":f"Prioritize adding: <b>{', '.join(list(missing_s)[:8])}</b>. These keywords appear in the JD and must be in the resume."})
+            "detail":f"Only {len(matched_s)} of {total_jd} required JD skills found.",
+            "suggestion":f"Prioritize adding: <b>{', '.join(list(missing_s)[:8])}</b>"})
         skill_score = 25
 
     cat_scores["Skills"] = skill_score
 
-    # ── 11. Summary / Objective Quality ───────────────────────
     tl = raw_text.lower()
     has_summary = any(kw in tl for kw in SECTION_KWS["summary"])
     if has_summary:
-        # check if summary has >30 words in its likely block
-        summary_idx = min([tl.find(kw) for kw in SECTION_KWS["summary"] if kw in tl])
+        summary_idx   = min([tl.find(kw) for kw in SECTION_KWS["summary"] if kw in tl])
         summary_block = raw_text[summary_idx:summary_idx+400]
         sw = _word_count(summary_block)
         if sw >= 30:
             passed.append({"category":"Content","label":"Summary section is detailed","detail":"Summary is substantive and will be read by both ATS and human recruiters."})
         else:
             issues.append({"category":"Content","label":"Summary too short","severity":"medium",
-                "detail":"Summary section appears to be under 30 words. Too brief to be impactful.",
-                "suggestion":"Expand summary to 3–4 lines: <b>Who you are + Top skills + Current role/goal + Value you bring</b>. Include JD keywords naturally."})
+                "detail":"Summary section appears to be under 30 words.",
+                "suggestion":"Expand summary to 3–4 lines: <b>Who you are + Top skills + Current role/goal + Value you bring</b>"})
     cat_scores["Content"] = max(cat_scores.get("Content",0), 50)
 
-    # ── Compute overall audit score ────────────────────────────
-    weights = {"Content":30, "Sections":25, "Skills":25, "Format":10, "Style":10}
-    total_w  = sum(weights.values())
-    overall  = sum(cat_scores.get(cat, 60) * w for cat, w in weights.items()) // total_w
-
-    # Factor in semantic match score (30% weight)
+    weights     = {"Content":30, "Sections":25, "Skills":25, "Format":10, "Style":10}
+    total_w     = sum(weights.values())
+    overall     = sum(cat_scores.get(cat, 60) * w for cat, w in weights.items()) // total_w
     final_score = int(overall * 0.70 + match_score * 0.30)
 
-    # Grade
-    if final_score >= 85: grade = ("A", "#3FB950")
+    if final_score >= 85:   grade = ("A", "#3FB950")
     elif final_score >= 70: grade = ("B", "#2DC08D")
     elif final_score >= 55: grade = ("C", "#D29922")
     elif final_score >= 40: grade = ("D", "#F0883E")
-    else: grade = ("F", "#F85149")
+    else:                   grade = ("F", "#F85149")
 
     return {
-        "filename":    filename,
-        "issues":      sorted(issues, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3}.get(x["severity"],4)),
-        "passed":      passed,
-        "cat_scores":  cat_scores,
-        "overall":     final_score,
-        "grade":       grade,
+        "filename":       filename,
+        "issues":         sorted(issues, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3}.get(x["severity"],4)),
+        "passed":         passed,
+        "cat_scores":     cat_scores,
+        "overall":        final_score,
+        "grade":          grade,
         "matched_skills": matched_s,
         "missing_skills": missing_s,
-        "coverage":    coverage,
-        "quant_count": quant_count,
-        "action_count":action_count,
-        "word_count":  wc,
+        "coverage":       coverage,
+        "quant_count":    quant_count,
+        "action_count":   action_count,
+        "word_count":     wc,
     }
 
 
@@ -636,20 +585,6 @@ def score_color(score):
     if score >= 75: return "#3FB950"
     if score >= 50: return "#D29922"
     return "#F85149"
-
-def svg_ring(score, size=110, stroke=9):
-    r    = (size - stroke) / 2
-    circ = 2 * 3.14159 * r
-    fill = circ * score / 100
-    gap  = circ - fill
-    col  = score_color(score)
-    return f"""<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">
-      <circle cx="{size/2}" cy="{size/2}" r="{r}" fill="none" stroke="#1C2333" stroke-width="{stroke}"/>
-      <circle cx="{size/2}" cy="{size/2}" r="{r}" fill="none" stroke="{col}" stroke-width="{stroke}"
-        stroke-dasharray="{fill} {gap}" stroke-dashoffset="{circ/4}" stroke-linecap="round"/>
-      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
-        font-family="Syne,sans-serif" font-size="20" font-weight="800" fill="#E6EDF3">{score}%</text>
-    </svg>"""
 
 def mini_bar(value, color="#2DC08D"):
     return f"""<div class="mini-bar-bg">
@@ -701,11 +636,11 @@ with st.sidebar:
     st.markdown("""
     <div style='font-size:12px;color:#8B949E;line-height:1.6;'>
       <b style='color:#E6EDF3;'>Scoring model</b><br><br>
-      <b style='color:#2DC08D;'>Tier 1 (30%)</b> — Semantic similarity via sentence-transformer embeddings.<br><br>
+      <b style='color:#2DC08D;'>Tier 1 (30%)</b> — TF-IDF cosine similarity.<br><br>
       <b style='color:#2DC08D;'>Tier 2 (70%)</b> — 19-point resume audit: sections, content quality, skills, format, style.
     </div>""", unsafe_allow_html=True)
     st.markdown("---")
-    st.caption("Powered by Sentence Transformers + NLP")
+    st.caption("Powered by TF-IDF + spaCy NLP")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -751,7 +686,7 @@ if selected == "About":
     st.markdown("""
     <div class="hero-band">
       <div class="hero-title">About <span>ResumeIQ</span></div>
-      <p class="hero-sub">Enterprise-grade AI resume screening — built on two-tier semantic NLP,
+      <p class="hero-sub">Enterprise-grade AI resume screening — built on two-tier NLP,
       a 19-point audit engine, and skill-gap analysis.</p>
     </div>""", unsafe_allow_html=True)
 
@@ -761,9 +696,9 @@ if selected == "About":
         <div class="tier-box"><div style='display:flex;gap:12px;align-items:flex-start;'>
           <div class="tier-num">1</div>
           <div><div style='font-family:Syne,sans-serif;font-size:14px;font-weight:700;color:#E6EDF3;'>
-            Semantic Similarity</div>
+            TF-IDF Similarity</div>
           <div style='font-size:13px;color:#8B949E;line-height:1.5;margin-top:4px;'>
-            Sentence-transformer embeddings compare full resume meaning against the JD.
+            TF-IDF vectors compare resume keywords against the JD using cosine similarity.
             Contributes 30% of the final score.</div></div></div></div>""", unsafe_allow_html=True)
     with c2:
         st.markdown("""
@@ -781,10 +716,14 @@ if selected == "About":
     <div style='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 24px;'>
       <div style='font-family:Syne,sans-serif;font-size:15px;font-weight:700;color:#E6EDF3;margin-bottom:12px;'>Tech Stack</div>
       <div style='display:flex;flex-wrap:wrap;gap:8px;'>
-        <span class='chip chip-pass'>Sentence Transformers</span><span class='chip chip-pass'>spaCy NLP</span>
-        <span class='chip chip-pass'>Streamlit</span><span class='chip chip-pass'>Plotly</span>
-        <span class='chip chip-pass'>PyMuPDF / python-docx</span><span class='chip chip-pass'>Cosine Similarity</span>
-        <span class='chip chip-pass'>Pandas</span><span class='chip chip-pass'>Regex Audit Engine</span>
+        <span class='chip chip-pass'>TF-IDF Vectorizer</span>
+        <span class='chip chip-pass'>spaCy NLP</span>
+        <span class='chip chip-pass'>Streamlit</span>
+        <span class='chip chip-pass'>Plotly</span>
+        <span class='chip chip-pass'>pdfplumber / python-docx</span>
+        <span class='chip chip-pass'>Cosine Similarity</span>
+        <span class='chip chip-pass'>Pandas</span>
+        <span class='chip chip-pass'>Regex Audit Engine</span>
       </div>
     </div>""", unsafe_allow_html=True)
     st.stop()
@@ -797,7 +736,7 @@ st.markdown("""
 <div class="hero-band">
   <div class="hero-title">AI Resume <span>Screener</span></div>
   <p class="hero-sub">Upload candidate resumes and paste the job description.
-  ResumeIQ runs a two-tier semantic + 19-point audit, ranks every candidate,
+  ResumeIQ runs a two-tier NLP + 19-point audit, ranks every candidate,
   and delivers a full per-resume report with issues and fix suggestions.</p>
 </div>""", unsafe_allow_html=True)
 
@@ -851,7 +790,6 @@ if run:
 
         jd_processed = full_preprocess(jd_text)
         jd_skills    = extract_skills(jd_text)
-        
 
         candidate_names = []
         resume_texts    = []
@@ -869,13 +807,14 @@ if run:
             raw_texts.append(raw)
             os.unlink(tmp_path)
 
-        # Fit TF-IDF on ALL texts together so vocabulary matches
-        from src.vectorizer import fit_and_encode
-        all_texts         = resume_texts + [jd_processed]
-        all_embeddings    = fit_and_encode(all_texts)
-        resume_embeddings = all_embeddings[:-1]
-        jd_embedding      = all_embeddings[-1]
-        scores            = score_all_resumes(resume_embeddings, jd_embedding)
+        # ── Fit TF-IDF on ALL texts together ──────────────────
+        # JD is last item; resumes are everything before it
+        all_texts      = resume_texts + [jd_processed]
+        all_embeddings = fit_and_encode(all_texts)
+        resume_embeddings = all_embeddings[:-1]   # all rows except last
+        jd_embedding      = all_embeddings[-1]    # last row = JD
+
+        scores = score_all_resumes(resume_embeddings, jd_embedding)
 
         skill_data = []
         for text in raw_texts:
@@ -885,7 +824,6 @@ if run:
 
         results_df = rank_candidates(candidate_names, scores, skill_data, threshold)
 
-        # ── Run 19-point audit per candidate ──────────────────
         audit_reports = {}
         for i, (name, raw_text) in enumerate(zip(candidate_names, raw_texts)):
             match_pct = float(scores[i] * 100) if scores[i] <= 1 else float(scores[i])
@@ -893,10 +831,8 @@ if run:
 
     st.success("✅  Analysis & Audit complete.")
 
-    # ── Metrics ───────────────────────────────────────────────
     shortlisted  = results_df[results_df["Status"].str.contains("Shortlisted", na=False)]
     needs_review = results_df[results_df["Status"].str.contains("Review", na=False)]
-    top_score    = int(results_df["Match Score (%)"].max())
     avg_score    = int(results_df["Match Score (%)"].mean())
 
     m1,m2,m3,m4 = st.columns(4)
@@ -915,7 +851,6 @@ if run:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── TABS ─────────────────────────────────────────────────
     tab_rank, tab_audit, tab_chart, tab_skills, tab_data = st.tabs([
         "🏆 Rankings",
         "🔍 Resume Audit Reports",
@@ -924,28 +859,20 @@ if run:
         "📋 Raw Data"
     ])
 
-    # ────────────────────────────────────────────────────────
-    # TAB 1: Rankings
-    # ────────────────────────────────────────────────────────
     with tab_rank:
         st.markdown('<div class="section-label">Candidate Rankings</div>', unsafe_allow_html=True)
-
         for _, row in results_df.iterrows():
-            score   = int(row["Match Score (%)"])
-            status  = row["Status"]
-            pclass  = pill_class(status)
-            name    = row["Candidate"]
-
+            score  = int(row["Match Score (%)"])
+            status = row["Status"]
+            pclass = pill_class(status)
+            name   = row["Candidate"]
             matched = row.get("Matched Skills","None")
             missing = row.get("Missing Skills","None")
             n_match = 0 if matched == "None" else len(matched.split(", "))
-            n_miss  = 0 if missing == "None" else len(missing.split(", "))
-
             audit = audit_reports.get(name, {})
             grade_letter, grade_color = audit.get("grade", ("?","#8B949E"))
             n_issues = len(audit.get("issues", []))
             n_passed = len(audit.get("passed", []))
-
             st.markdown(f"""
             <div class="cand-card">
               <div class="rank-badge">#{int(row['Rank'])}</div>
@@ -972,12 +899,8 @@ if run:
               <div class="status-pill {pclass}">{status}</div>
             </div>""", unsafe_allow_html=True)
 
-    # ────────────────────────────────────────────────────────
-    # TAB 2: Resume Audit Reports  ← NEW
-    # ────────────────────────────────────────────────────────
     with tab_audit:
-        st.markdown('<div class="section-label">Per-Resume 19-Point Audit Reports</div>',
-                    unsafe_allow_html=True)
+        st.markdown('<div class="section-label">Per-Resume 19-Point Audit Reports</div>', unsafe_allow_html=True)
         st.markdown("""
         <div style='font-size:13px;color:#8B949E;margin-bottom:20px;line-height:1.6;'>
           Every resume is audited across <b style='color:#E6EDF3;'>5 categories</b> and
@@ -996,11 +919,8 @@ if run:
             issues       = audit["issues"]
             passed_list  = audit["passed"]
             cat_scores   = audit["cat_scores"]
-            n_crit       = sum(1 for i in issues if i["severity"] == "critical")
-            n_high       = sum(1 for i in issues if i["severity"] == "high")
-
-            # header color
-            hdr_color = grade_c
+            n_crit = sum(1 for i in issues if i["severity"] == "critical")
+            n_high = sum(1 for i in issues if i["severity"] == "high")
 
             st.markdown(f"""
             <div class="audit-panel">
@@ -1017,7 +937,7 @@ if run:
                 <div style='display:flex;align-items:center;gap:14px;'>
                   <div style='text-align:right;'>
                     <div style='font-size:11px;color:#8B949E;'>Audit Score</div>
-                    <div class="audit-score-badge" style='color:{hdr_color};border:1px solid {hdr_color};
+                    <div class="audit-score-badge" style='color:{grade_c};border:1px solid {grade_c};
                       background:rgba(0,0,0,.3);'>{score}% &nbsp; {grade_l}</div>
                   </div>
                 </div>
@@ -1025,12 +945,11 @@ if run:
               <div class="audit-body">
             """, unsafe_allow_html=True)
 
-            # ── Category score bars ────────────────────────
             st.markdown("**Category Breakdown**")
             cats_ordered = ["Content","Sections","Skills","Format","Style"]
             bar_cols = st.columns(len(cats_ordered))
             for ci, cat in enumerate(cats_ordered):
-                cs  = cat_scores.get(cat, 0)
+                cs    = cat_scores.get(cat, 0)
                 col_c = score_color(cs)
                 with bar_cols[ci]:
                     st.markdown(f"""
@@ -1043,26 +962,22 @@ if run:
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # ── Critical summary banner ────────────────────
             if n_crit > 0 or n_high > 0:
                 st.markdown(f"""
                 <div style='background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.25);
                   border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;'>
                   ⚠️ &nbsp;<b style='color:#F85149;'>{n_crit} critical</b> and
-                  <b style='color:#F0883E;'>{n_high} high-severity</b> issue(s) require
-                  immediate attention before submitting this resume.
+                  <b style='color:#F0883E;'>{n_high} high-severity</b> issue(s) require immediate attention.
                 </div>""", unsafe_allow_html=True)
 
-            # ── Issues list ────────────────────────────────
             if issues:
                 st.markdown("**Issues Found**")
                 for issue in issues:
-                    sev   = issue["severity"]
-                    icon  = SEV_ICON.get(sev,"⚪")
+                    sev  = issue["severity"]
+                    icon = SEV_ICON.get(sev,"⚪")
                     col_s = SEV_COLOR.get(sev,"#8B949E")
-                    cat   = issue["category"]
-                    cc    = CAT_CLASS.get(cat,"")
-
+                    cat  = issue["category"]
+                    cc   = CAT_CLASS.get(cat,"")
                     st.markdown(f"""
                     <div class="check-row">
                       <div class="check-icon">{icon}</div>
@@ -1082,11 +997,10 @@ if run:
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # ── Passed checks ──────────────────────────────
             with st.expander(f"✅ View {len(passed_list)} passed checks — {name}"):
                 for p in passed_list:
-                    cat  = p["category"]
-                    cc   = CAT_CLASS.get(cat,"")
+                    cat = p["category"]
+                    cc  = CAT_CLASS.get(cat,"")
                     st.markdown(f"""
                     <div class="check-row">
                       <div class="check-icon">✅</div>
@@ -1099,11 +1013,9 @@ if run:
                       </div>
                     </div>""", unsafe_allow_html=True)
 
-            # ── Skill chips ────────────────────────────────
             st.markdown("**Skill Coverage vs Job Description**")
             ms = audit.get("matched_skills", [])
             mi = audit.get("missing_skills", [])
-
             c_ms, c_mi = st.columns(2)
             with c_ms:
                 st.markdown(f'<div style="font-size:12px;color:#3FB950;margin-bottom:6px;">✅ Matched ({len(ms)})</div>', unsafe_allow_html=True)
@@ -1117,12 +1029,8 @@ if run:
             st.markdown("</div></div>", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
-    # ────────────────────────────────────────────────────────
-    # TAB 3: Charts
-    # ────────────────────────────────────────────────────────
     with tab_chart:
         color_map = {"Shortlisted":"#2DC08D","Needs Review":"#D29922","Rejected":"#F85149"}
-
         fig_bar = px.bar(results_df, x="Candidate", y="Match Score (%)",
             color="Status", color_discrete_map=color_map,
             title="Candidate Match Scores", text="Match Score (%)")
@@ -1133,7 +1041,6 @@ if run:
         fig_bar.update_traces(texttemplate="%{text}%", textposition="outside")
         st.plotly_chart(fig_bar, use_container_width=True)
 
-        # Audit scores chart
         audit_chart_data = []
         for _, row in results_df.iterrows():
             name  = row["Candidate"]
@@ -1143,7 +1050,7 @@ if run:
                 audit_chart_data.append({"Candidate":name,"Category":cat,"Score":val})
 
         if audit_chart_data:
-            adf     = pd.DataFrame(audit_chart_data)
+            adf = pd.DataFrame(audit_chart_data)
             fig_cat = px.bar(adf, x="Candidate", y="Score", color="Category",
                 barmode="group", title="Audit Category Scores per Candidate",
                 color_discrete_sequence=["#388BFD","#2DC08D","#D29922","#F85149","#A371F7"])
@@ -1155,7 +1062,7 @@ if run:
 
         c_pie, c_sc = st.columns(2)
         with c_pie:
-            sc   = results_df["Status"].value_counts().reset_index()
+            sc = results_df["Status"].value_counts().reset_index()
             sc.columns = ["Status","Count"]
             fig_pie = px.pie(sc, names="Status", values="Count", title="Status Breakdown",
                 color="Status", color_discrete_map=color_map, hole=0.55)
@@ -1175,12 +1082,8 @@ if run:
                 xaxis=dict(gridcolor="#30363D"), yaxis=dict(gridcolor="#30363D"))
             st.plotly_chart(fig_sc, use_container_width=True)
 
-    # ────────────────────────────────────────────────────────
-    # TAB 4: Skill Analysis
-    # ────────────────────────────────────────────────────────
     with tab_skills:
         st.markdown('<div class="section-label">Skill Gap Analysis</div>', unsafe_allow_html=True)
-
         st.markdown("**Required skills from JD**")
         jd_chips = "".join(f'<span class="chip chip-blue">{s}</span>' for s in sorted(jd_skills)) \
             or '<span style="color:#8B949E;font-size:13px;">None extracted</span>'
@@ -1208,14 +1111,10 @@ if run:
             xaxis=dict(gridcolor="#30363D"), yaxis=dict(gridcolor="#30363D"))
         st.plotly_chart(fig_sk, use_container_width=True)
 
-    # ────────────────────────────────────────────────────────
-    # TAB 5: Raw Data
-    # ────────────────────────────────────────────────────────
     with tab_data:
         st.markdown('<div class="section-label">Full Results Table</div>', unsafe_allow_html=True)
         st.dataframe(results_df, use_container_width=True, hide_index=True)
 
-        # Augment with audit scores for download
         download_rows = []
         for _, row in results_df.iterrows():
             d   = dict(row)
